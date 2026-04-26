@@ -1,0 +1,41 @@
+{
+  "name": "@matthesketh/second-brain-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for matts-second-brain — exposes brain_recall / brain_remember / brain_scan_transcripts / brain_setup_check / brain_install on top of a Trilium Notes ETAPI backend.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "second-brain-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^1.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "trilium",
+    "memory",
+    "second-brain"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wrxck/matts-second-brain.git",
+    "directory": "mcp-server"
+  }
+}

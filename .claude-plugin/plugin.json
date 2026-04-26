@@ -1,0 +1,20 @@
+{
+  "name": "matts-second-brain",
+  "version": "0.1.0",
+  "description": "A persistent knowledge brain for Claude Code, backed by Trilium Notes. Standards, decisions, lessons learned, and per-app context that survive across sessions and grow over time. Includes a setup wizard, an MCP server with brain_recall / brain_remember / brain_scan_transcripts tools, and a discipline skill that makes Claude actually use it.",
+  "author": {
+    "name": "Matt Hesketh",
+    "email": "matt@heskethwebdesign.co.uk"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "knowledge-base",
+    "trilium",
+    "second-brain",
+    "claude-code",
+    "mcp",
+    "skills",
+    "self-improvement"
+  ]
+}

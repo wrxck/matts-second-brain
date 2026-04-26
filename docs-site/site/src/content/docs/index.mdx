@@ -1,0 +1,40 @@
+---
+title: "Matt's Second Brain"
+description: A persistent Claude Code knowledge brain backed by Trilium / Obsidian / Notion.
+template: splash
+hero:
+  tagline: A structured, searchable, editable knowledge base that you and Claude both contribute to.
+  actions:
+    - text: Install in 30 seconds
+      link: /getting-started/install/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/wrxck/matts-second-brain
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What you get
+
+<CardGrid stagger>
+  <Card title="A second memory" icon="document">
+    Standards, decisions, lessons learned, and per-app gotchas that survive across Claude sessions and grow over time.
+  </Card>
+  <Card title="Three backends, one interface" icon="seti:db">
+    Use Trilium (default), Obsidian, or Notion. Same MCP tools, same discipline. Switch with one env var.
+  </Card>
+  <Card title="Discipline baked in" icon="approve-check">
+    Claude is required to cite when consulting, verify before recommending, and write decisions with what / why / evidence — not opinions.
+  </Card>
+  <Card title="Optional transcript scanning" icon="magnifier">
+    Mine your past Claude sessions for repeated corrections — turn them into Standards you only have to teach once.
+  </Card>
+</CardGrid>
+
+## Why?
+
+Claude Code's built-in `MEMORY.md` is great for short personal preferences, but it doesn't scale to dozens of apps and hundreds of standards. A real notes backend does — and most people already have one (Trilium, Obsidian, Notion).
+
+This plugin closes the gap. Claude reads your knowledge base before acting, writes back when something noteworthy happens, and the discipline rules stop it filling the brain with noise.
