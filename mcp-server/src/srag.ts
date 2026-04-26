@@ -120,14 +120,23 @@ export interface SemanticHit {
   score?: number;
 }
 
-export function querySrag(query: string, _limit = 10): { ok: boolean; hits: SemanticHit[]; raw: string; stderr: string } {
+export interface QueryResult {
+  ok: boolean;
+  hits: SemanticHit[];
+  /** Synthesised answer from srag's RAG layer, when present. */
+  answer?: string;
+  raw: string;
+  stderr: string;
+}
+
+export function querySrag(query: string, _limit = 10): QueryResult {
   const r = spawnSync(sragBin(), ['query', '--project', SRAG_PROJECT, '--query', query, '--json'], { encoding: 'utf8' });
   if (r.status !== 0) {
     return { ok: false, hits: [], raw: r.stdout ?? '', stderr: r.stderr ?? `srag exited ${r.status}` };
   }
   const out = r.stdout ?? '';
-  // srag --json output shape varies by version; be defensive: try strict
-  // JSON parse first, then line-delimited JSON, then return raw.
+  // srag --json output: { answer: string, sources: [{file_path, start_line, end_line, content, ...}] }
+  // Older / future versions may use { results: [...] } or { hits: [...] }; try all.
   let parsed: any = null;
   try { parsed = JSON.parse(out); }
   catch {
@@ -137,8 +146,8 @@ export function querySrag(query: string, _limit = 10): { ok: boolean; hits: Sema
   const hits: SemanticHit[] = [];
   const collect = (entry: any) => {
     if (!entry) return;
-    const file = entry.path ?? entry.file ?? entry.source ?? '';
-    const snippet = entry.text ?? entry.content ?? entry.snippet ?? entry.chunk ?? '';
+    const file = entry.file_path ?? entry.path ?? entry.file ?? entry.source ?? '';
+    const snippet = entry.content ?? entry.text ?? entry.snippet ?? entry.chunk ?? '';
     const score = typeof entry.score === 'number' ? entry.score : (typeof entry.distance === 'number' ? entry.distance : undefined);
     // filename pattern: <sanitisedId>__<sanitisedTitle>.md
     const base = file.split('/').pop() ?? '';
@@ -146,7 +155,9 @@ export function querySrag(query: string, _limit = 10): { ok: boolean; hits: Sema
     if (file || snippet) hits.push({ noteId, file, snippet, score });
   };
   if (Array.isArray(parsed)) parsed.forEach(collect);
+  else if (parsed?.sources) (parsed.sources as any[]).forEach(collect);
   else if (parsed?.results) (parsed.results as any[]).forEach(collect);
   else if (parsed?.hits) (parsed.hits as any[]).forEach(collect);
-  return { ok: true, hits, raw: out, stderr: r.stderr ?? '' };
+  const answer = typeof parsed?.answer === 'string' ? parsed.answer : undefined;
+  return { ok: true, hits, answer, raw: out, stderr: r.stderr ?? '' };
 }

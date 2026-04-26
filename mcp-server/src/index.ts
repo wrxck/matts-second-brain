@@ -321,7 +321,11 @@ async function main() {
         return text(`No semantic matches for "${query}".\n(Tip: if you've added notes recently, run brain_sync_srag to refresh the embeddings.)`);
       }
       const a = loadAdapter();
-      const lines: string[] = [`Semantic matches for "${query}" (backend=${a.name}, ${out.hits.length} hits):`];
+      const lines: string[] = [];
+      if (out.answer) {
+        lines.push(`Answer (synthesised by srag):`, `  ${out.answer}`, '');
+      }
+      lines.push(`Semantic matches for "${query}" (backend=${a.name}, ${out.hits.length} hits):`);
       for (const h of out.hits.slice(0, limit)) {
         const scoreStr = typeof h.score === 'number' ? ` score=${h.score.toFixed(3)}` : '';
         lines.push(`  • ${h.file}${h.noteId ? `  (noteId=${h.noteId})` : ''}${scoreStr}`);
