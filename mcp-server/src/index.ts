@@ -14,12 +14,14 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, appendFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { loadAdapter, type BrainAdapter } from './adapters/index.js';
 import { exportBrain, indexExport, querySrag, sragInstalled, exportDir } from './srag.js';
+
+const PROPOSALS_DIR = join(homedir(), '.cache', 'claude-brain');
 
 const ROOT_NOTE_TITLE = 'Claude Memory';
 const TAXONOMY = ['00 — How to use this brain', 'Standards', 'Decisions', 'Lessons Learned', 'Apps', 'Reviews', 'Drafts'] as const;
@@ -335,7 +337,65 @@ async function main() {
     },
   );
 
-  // ── ready ────────────────────────────────────────────────────────────
+  // -- brain_propose --
+  server.tool(
+    'brain_propose',
+    'Queue a proposed brain note for human review later — does NOT write to the brain. Used by the Stop hook to surface "things worth remembering" without polluting the brain with auto-writes. Review with brain_review_proposals.',
+    {
+      category: z.enum(VALID_CATEGORIES),
+      title: z.string().min(3),
+      body: z.string().min(20),
+      tags: z.array(z.string()).optional().default([]),
+      sessionId: z.string().optional().default('default').describe('Claude session id; lets review group proposals by session'),
+    },
+    async ({ category, title, body, tags, sessionId }) => {
+      if (!existsSync(PROPOSALS_DIR)) mkdirSync(PROPOSALS_DIR, { recursive: true });
+      const file = join(PROPOSALS_DIR, `proposals-${sessionId}.jsonl`);
+      const entry = { ts: new Date().toISOString(), sessionId, category, title, body, tags };
+      appendFileSync(file, JSON.stringify(entry) + '\n');
+      return text(`Queued proposal for review:\n  ${category} / ${title}\n  file: ${file}`);
+    },
+  );
+
+  // -- brain_review_proposals --
+  server.tool(
+    'brain_review_proposals',
+    'List pending brain note proposals (queued by hooks or brain_propose). With drain=true, removes them after listing — caller is expected to brain_remember any worth keeping in the same turn.',
+    {
+      sessionId: z.string().optional().describe('Filter to a single session id'),
+      drain: z.boolean().optional().default(false).describe('Pop proposals after listing (default false)'),
+    },
+    async ({ sessionId, drain }) => {
+      if (!existsSync(PROPOSALS_DIR)) return text('No pending proposals.');
+      const files = readdirSync(PROPOSALS_DIR).filter(f => f.startsWith('proposals-') && f.endsWith('.jsonl'));
+      const all: Array<{ ts: string; sessionId: string; category: string; title: string; body: string; tags: string[] }> = [];
+      const drained: string[] = [];
+      for (const f of files) {
+        if (sessionId && !f.includes(sessionId)) continue;
+        const full = join(PROPOSALS_DIR, f);
+        const lines = readFileSync(full, 'utf8').split('\n').filter(Boolean);
+        for (const l of lines) {
+          try { all.push(JSON.parse(l)); } catch { /* skip malformed */ }
+        }
+        if (drain) {
+          try { unlinkSync(full); drained.push(f); } catch { /* ignore */ }
+        }
+      }
+      if (all.length === 0) return text('No pending proposals.');
+      const lines: string[] = [`${all.length} pending proposal(s):`, ''];
+      all.forEach((p, i) => {
+        lines.push(`  ${i + 1}. [${p.category}] ${p.title}  (session=${p.sessionId}, ${p.ts})`);
+        lines.push(`     ${p.body.slice(0, 240).replace(/\s+/g, ' ').trim()}`);
+        if (p.tags.length) lines.push(`     tags: ${p.tags.join(', ')}`);
+        lines.push('');
+      });
+      if (drain) lines.push(`(drained ${drained.length} file(s))`);
+      else lines.push('Call again with drain=true after acting on these to clear the queue.');
+      return text(lines.join('\n'));
+    },
+  );
+
+  // -- ready --
   await server.connect(new StdioServerTransport());
 }
 

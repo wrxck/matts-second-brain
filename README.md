@@ -24,10 +24,31 @@ Built after a real incident: a leaked secret revealed that the only memory Claud
 
 | Component | What it does |
 |---|---|
-| **MCP server** (`@matthesketh/second-brain-mcp`) | Tools: `brain_recall`, `brain_remember`, `brain_scan_transcripts`, `brain_setup_check`, `brain_install` |
+| **MCP server** (`@matthesketh/second-brain-mcp`) | Tools: `brain_recall`, `brain_remember`, `brain_propose`, `brain_review_proposals`, `brain_scan_transcripts`, `brain_setup_check`, `brain_install` |
+| **Smart hooks** (`hooks/*.py`) | Auto-recall on session start + on each prompt; auto-propose-to-remember on session end; file-context recall before edits. See "Smart hooks" below. |
+| **brain CLI** (`brain`) | Synchronous wrapper around the adapter — used by the hooks and handy for shell scripts. |
 | **Skills** (`/matts-second-brain:install`, `:recall`, `:remember`) | User-invokable commands for setup + manual write-back |
 | **Discipline skill** (loaded via plugin) | The rules Claude follows: cite when consulting, verify before recommending, write decisions not opinions, surface contradictions |
 | **Setup wizard** | Detects whether Trilium is reachable; offers to install if not. Generates the root taxonomy. Optionally seeds from existing transcripts. |
+
+## Smart hooks
+
+The plugin ships four Claude Code hooks under `hooks/` that make the brain proactive — no need to call `/recall` manually before every task.
+
+| Hook | Trigger | What it does |
+|---|---|---|
+| `session_start.py` | new Claude session | Derives the app name from `cwd`, recalls top `/Apps/<name>` notes + standards, surfaces any pending proposals queued by the previous session's Stop hook. |
+| `user_prompt_submit.py` | each user prompt | Scans for app names (cached hourly from `/Apps/*` notes), tech keywords (`fleet`, `nginx`, `webauthn`, ...), and "how do we / what's our standard" phrases; pulls top 2 brain matches per trigger and injects them as additional context. |
+| `stop.py` | Claude finishes responding | Scans the session transcript for corrections, decisions, regressions, and files edited 3+ times; **queues** `brain_propose` payloads for review next session. Never auto-writes — you stay in the loop. |
+| `pre_tool_use_edit.py` | before Edit/Write | Resolves the target file's repo, recalls its `/Apps/<reponame>` note, throttled to once per minute per repo so it doesn't spam context on every keystroke. |
+
+**Proposals workflow:** the Stop hook never writes to the brain. Instead it appends drafts to `~/.cache/claude-brain/proposals-<sessionId>.jsonl`. When the next session starts, `session_start.py` injects "N brain proposal(s) pending review", and Claude can call `brain_review_proposals` (a new MCP tool) to list them and act on the keepers via `brain_remember`. Silent auto-writes degrade brain quality; surfaced proposals keep them honest.
+
+**Opt out per shell**: `BRAIN_QUIET=1` env var.
+**Opt out per user**: `touch ~/.claude/.brain-quiet`.
+**Opt out per repo**: `touch <repo>/.brain-ignore`.
+
+The hooks call into a thin synchronous CLI (`brain` on PATH, or `node <plugin>/mcp-server/dist/cli.js`) that wraps the same adapter factory as the MCP server. Subcommands: `recall`, `remember`, `propose`, `proposals`, `apps`. Run `brain --help` for shapes.
 
 ## Install
 

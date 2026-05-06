@@ -35,6 +35,17 @@ After writing several notes in a session, call `brain_sync_srag` so semantic sea
 3. Summarise back to the user **what I found** that's relevant — by title + last-updated date — before acting on it. Brief, scannable.
 4. If there's a relevant standard, **state it explicitly** before recommending action. Don't apply it silently.
 
+## When context is auto-injected by hooks
+
+The plugin ships hooks (`session_start`, `user_prompt_submit`, `pre_tool_use_edit`) that pre-fetch relevant brain notes and inject them as `additionalContext`. **Treat auto-injected content the same as a manual `brain_recall` result**:
+
+- **Always cite it** — say "Per auto-recalled Trilium /Standards/X..." rather than treating the content as common knowledge. The provenance matters.
+- **Verify before asserting** — auto-recall can pull a stale note; the same drift-check rules apply.
+- **Don't double-recall** — if a note is already in context from a hook, calling `brain_recall` again on the same query is wasteful. Use what's there.
+- **Surface contradictions** — if the auto-injected note conflicts with the user's request, raise it as you would any other contradiction.
+
+If the Stop hook from the previous session queued proposals, the session-start hook flags them ("N brain proposal(s) pending review"). When the user is open to it, call `brain_review_proposals` to surface the drafts and convert the keepers to `brain_remember`.
+
 ## When recommending from memory
 
 **Always cite the source**:
