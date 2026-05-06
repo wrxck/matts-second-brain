@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "second-brain-mcp": "dist/index.js"
+    "second-brain-mcp": "dist/index.js",
+    "brain": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",

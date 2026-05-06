@@ -96,9 +96,44 @@ If `--scan-transcripts` flag passed:
   - Per-app gotchas → candidate `Apps/<name>/`
 - **Always present inferred notes for human review before writing** — never bulk-create. The user accepts/rejects each.
 
-## Phase 6 — verify
+## Phase 6 — wire up the smart hooks
+
+The plugin ships four Claude Code hooks under `<plugin>/hooks/` that make the brain proactive without manual `/recall` calls:
+
+- `session_start.py` — opportunistic recall: derives the app name from `cwd`, pulls top `/Apps/<name>` + standards, surfaces any pending proposals from the previous session.
+- `user_prompt_submit.py` — keyword-triggered recall: scans the user's prompt for known app names, tech keywords, or "how do we / what's our standard" phrases, pulls top 2 results per trigger.
+- `stop.py` — auto-remember proposer: scans the session transcript for corrections, decisions, regressions, and multi-attempt fixes; queues `brain_propose` payloads for review on next session start. Never auto-writes.
+- `pre_tool_use_edit.py` — file-context recall: before Edit/Write tools, recalls the target repo's `/Apps/<reponame>` note (throttled to once per minute per repo).
+
+Wire them into the user's `~/.claude/settings.json` non-destructively:
+
+1. Resolve the plugin install dir (typically `~/.claude/plugins/cache/<marketplace>/matts-second-brain/<version>/`).
+2. Read the existing `~/.claude/settings.json` if present, parse it, merge a `hooks` block that appends the plugin's four scripts (don't overwrite the user's existing hooks — preserve order, append).
+3. Each hook entry uses an absolute path to the script. Example block:
+
+```json
+{
+  "hooks": {
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "python3 <plugin>/hooks/session_start.py" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 <plugin>/hooks/user_prompt_submit.py" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "python3 <plugin>/hooks/stop.py" }] }],
+    "PreToolUse":       [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "python3 <plugin>/hooks/pre_tool_use_edit.py" }] }]
+  }
+}
+```
+
+4. Tell the user about the opt-outs:
+   - `BRAIN_QUIET=1` env var disables all hooks for that shell.
+   - `~/.claude/.brain-quiet` (any content) disables globally for that user.
+   - `<repo>/.brain-ignore` disables for one repo (good for throwaway sandboxes).
+
+5. The `brain` CLI must be on PATH (or `BRAIN_CLI` env set to its path). Recommended: `npm link` from `mcp-server/` after `npm run build`. The hooks fall back to running `node <plugin>/mcp-server/dist/cli.js` if `brain` isn't found.
+
+## Phase 7 — verify
 
 End by:
-1. Calling `brain_recall("git workflow")` — should return citations from the seeded standards
-2. Telling the user to quit + relaunch Claude (so the new MCP registration takes effect)
-3. Suggesting first manual note to write so they get a feel for `brain_remember`
+1. Calling `brain_recall("git workflow")` — should return citations from the seeded standards.
+2. Echoing a sample prompt through `python3 <plugin>/hooks/user_prompt_submit.py` to confirm the hook returns `additionalContext` JSON for known triggers.
+3. Telling the user to quit + relaunch Claude (so the new MCP registration + hooks take effect).
+4. Mentioning the proposals workflow: anything the Stop hook flagged in past sessions surfaces at the next session start as "N brain proposal(s) pending review" — they can then call `brain_review_proposals` to act on them.
+5. Suggesting first manual note to write so they get a feel for `brain_remember`.
