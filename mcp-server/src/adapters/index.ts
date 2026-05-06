@@ -38,8 +38,11 @@ export interface BrainAdapter {
   ping(): Promise<void>;
 
   /** Free-text search. Should respect tags + breadcrumb context if the backend
-   *  supports them. limit is advisory. */
-  search(query: string, opts?: { limit?: number; tag?: string }): Promise<BrainNote[]>;
+   *  supports them. limit is advisory.
+   *  When exactTitle=true, only notes whose title equals the query exactly
+   *  should be returned. Backends that cannot natively filter by title must
+   *  post-filter by n.title === query. */
+  search(query: string, opts?: { limit?: number; tag?: string; exactTitle?: boolean }): Promise<BrainNote[]>;
 
   /** Resolve a path-like string ("Claude Memory/Standards") to an id. If
    *  create=true, build any missing intermediates. */

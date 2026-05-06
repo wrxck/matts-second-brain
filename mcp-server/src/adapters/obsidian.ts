@@ -59,7 +59,7 @@ export class ObsidianAdapter implements BrainAdapter {
     if (!existsSync(this.vault)) throw new Error(`vault missing: ${this.vault}`);
   }
 
-  async search(query: string, opts: { limit?: number; tag?: string } = {}): Promise<BrainNote[]> {
+  async search(query: string, opts: { limit?: number; tag?: string; exactTitle?: boolean } = {}): Promise<BrainNote[]> {
     const limit = opts.limit ?? 20;
     const needle = query.toLowerCase();
     const tagNeedle = opts.tag ? `#${opts.tag.toLowerCase()}` : null;
@@ -71,7 +71,9 @@ export class ObsidianAdapter implements BrainAdapter {
       if (tagNeedle && !lower.includes(tagNeedle)) continue;
       if (needle && !lower.includes(needle) && !file.toLowerCase().includes(needle)) continue;
       const id = pathToId(this.vault, file);
-      matches.push({ id, title: id.split('/').pop()!, mtime: statSync(file).mtimeMs });
+      const title = id.split('/').pop()!;
+      if (opts.exactTitle && title !== query) continue;
+      matches.push({ id, title, mtime: statSync(file).mtimeMs });
     }
     matches.sort((a, b) => b.mtime - a.mtime);
     return matches.slice(0, limit).map(m => ({

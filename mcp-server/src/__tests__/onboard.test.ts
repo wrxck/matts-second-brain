@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,16 +14,14 @@ class FakeAdapter implements BrainAdapter {
 
   async ping() {}
 
-  async search(query: string): Promise<BrainNote[]> {
-    // case-insensitive substring search on title
-    return this.notes
-      .filter(n => n.title.toLowerCase().includes(query.toLowerCase()))
-      .map(n => ({
-        id: n.id,
-        title: n.title,
-        modifiedAt: '2026-05-06',
-        path: n.path,
-      }));
+  async search(query: string, opts?: { limit?: number; tag?: string; exactTitle?: boolean }): Promise<BrainNote[]> {
+    let candidates = this.notes;
+    if (opts?.exactTitle) {
+      candidates = this.notes.filter(n => n.title === query);
+    } else {
+      candidates = this.notes.filter(n => n.title.toLowerCase().includes(query.toLowerCase()));
+    }
+    return candidates.map(n => ({ id: n.id, title: n.title, modifiedAt: '2026-05-06', path: n.path }));
   }
 
   async resolvePath() {
@@ -88,26 +86,28 @@ describe('onboardDirectory', () => {
     expect(existsSync(join(dir, 'lesson_docker_rootless.md'))).toBe(true);
 
     expect(report.entries.every(e => e.status === 'created')).toBe(true);
+    expect(report.entries.every(e => e.sourceDeleted === undefined)).toBe(true);
   });
 
-  // 2. dry-run: nothing written, adapter stays empty
-  it('dry-run: no notes created, source files exist', async () => {
+  // 2. dry-run: nothing written, adapter stays empty, skipped increments
+  it('dry-run: no notes created, source files exist, skipped increments', async () => {
     writeFile(dir, 'feedback_dry_test.md', '# Dry Test\n\nSome content here.');
     writeFile(dir, 'lesson_dry_lesson.md', '# Dry Lesson\n\nWhat: a thing.\nWhy: reasons.\nEvidence: tests.');
     writeFile(dir, 'project_dry_project.md', '# Dry Project\n\nA project decision.');
 
     const report = await onboardDirectory(adapter, { directory: dir, dryRun: true, deleteOnSuccess: false });
 
-    expect(report.dryRun).toBe(true);
+    expect(report.dryRun).toBeTruthy();
     expect(report.created).toBe(0);
+    expect(report.skipped).toBe(3);
     expect(adapter.notes).toHaveLength(0);
     expect(report.entries.every(e => e.status === 'dry-run')).toBe(true);
 
     expect(existsSync(join(dir, 'feedback_dry_test.md'))).toBe(true);
   });
 
-  // 3. delete-on-success: source files removed after create
-  it('delete-on-success: source files removed after successful create', async () => {
+  // 3. delete-on-success: source files removed, one entry per file with sourceDeleted=true
+  it('delete-on-success: source files removed, single entry per file', async () => {
     writeFile(dir, 'feedback_delete_test.md', '# Delete Test\n\nContent to migrate.');
     writeFile(dir, 'project_delete_project.md', '# Delete Project\n\nA project to delete.');
     writeFile(dir, 'lesson_delete_lesson.md', '# Delete Lesson\n\nWhat: test.\nWhy: deletion.\nEvidence: files gone.');
@@ -116,14 +116,19 @@ describe('onboardDirectory', () => {
 
     expect(report.created).toBe(3);
     expect(report.deletedSources).toBe(3);
+    expect(report.deletionFailures).toBe(0);
     expect(adapter.notes).toHaveLength(3);
+    // exactly one entry per file
+    expect(report.entries).toHaveLength(3);
+    expect(report.entries.every(e => e.status === 'created')).toBe(true);
+    expect(report.entries.every(e => e.sourceDeleted === true)).toBe(true);
 
     expect(existsSync(join(dir, 'feedback_delete_test.md'))).toBe(false);
     expect(existsSync(join(dir, 'project_delete_project.md'))).toBe(false);
     expect(existsSync(join(dir, 'lesson_delete_lesson.md'))).toBe(false);
   });
 
-  // 4. idempotency: skip if note with same title already exists
+  // 4. idempotency: skip if note with same title already exists in the right category
   it('idempotency: skips file if title already exists in adapter', async () => {
     adapter.notes.push({
       id: 'existing-1',
@@ -226,5 +231,51 @@ The real body content goes here.`;
     expect(note.body).toMatch(/Why:/i);
     expect(note.body).toMatch(/Evidence:/i);
     expect(note.body).toContain('We picked postgres for storage');
+  });
+
+  // regression: exactTitle prevents false-positive idempotency
+  it('exactTitle: note with body containing title substring is not treated as existing', async () => {
+    // "Other thing" body contains the words "Test thing" — without exactTitle
+    // a substring search would return it and cause a false-positive skip
+    adapter.notes.push({
+      id: 'other-1',
+      title: 'Other thing',
+      body: 'This body mentions Test thing somewhere.',
+      tags: ['claude-brain'],
+      path: 'Claude Memory/Standards/Other thing',
+    });
+
+    writeFile(dir, 'feedback_test_thing.md', '# Test thing\n\nA brand new note.');
+
+    const report = await onboardDirectory(adapter, { directory: dir, dryRun: false, deleteOnSuccess: false });
+
+    // should be created, not skipped — title mismatch
+    expect(report.created).toBe(1);
+    expect(report.skipped).toBe(0);
+    expect(adapter.notes.find(n => n.title === 'Test thing')).toBeDefined();
+  });
+
+  // walker safety: symlinks are skipped
+  it('symlinks are skipped', async () => {
+    writeFile(dir, 'feedback_real.md', '# Real Note\n\nActual content.');
+    symlinkSync(join(dir, 'feedback_real.md'), join(dir, 'feedback_symlink.md'));
+
+    const report = await onboardDirectory(adapter, { directory: dir, dryRun: false, deleteOnSuccess: false });
+
+    // only the real file should be counted
+    expect(report.total).toBe(1);
+    expect(report.created).toBe(1);
+    expect(adapter.notes).toHaveLength(1);
+  });
+
+  // dry-run counts as skipped
+  it('dry-run increments skipped counter', async () => {
+    writeFile(dir, 'feedback_a.md', '# Note A\n\nContent.');
+    writeFile(dir, 'lesson_b.md', '# Note B\n\nWhat: x.\nWhy: y.\nEvidence: z.');
+
+    const report = await onboardDirectory(adapter, { directory: dir, dryRun: true });
+
+    expect(report.skipped).toBe(2);
+    expect(report.created).toBe(0);
   });
 });

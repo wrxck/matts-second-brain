@@ -351,17 +351,23 @@ async function main() {
       const report = await onboardDirectory(adapter, { directory, dryRun, deleteOnSuccess });
       const lines = [
         `Onboard report for ${report.directory} (dry-run=${report.dryRun})`,
-        `  total scanned: ${report.total}`,
-        `  created:        ${report.created}`,
-        `  skipped:        ${report.skipped}`,
-        `  failed:         ${report.failed}`,
-        `  source deleted: ${report.deletedSources}`,
+        `  total scanned:     ${report.total}`,
+        `  created:           ${report.created}`,
+        `  skipped:           ${report.skipped}`,
+        `  failed:            ${report.failed}`,
+        `  source deleted:    ${report.deletedSources}`,
+        `  deletion failures: ${report.deletionFailures}`,
         ``,
         `Entries:`,
       ];
       for (const e of report.entries) {
+        const extra = [
+          e.sourceDeleted === true ? 'source-deleted=true' : e.sourceDeleted === false ? 'source-deleted=false(failed)' : '',
+          e.reason ? `reason=${e.reason}` : '',
+          e.noteId ? `id=${e.noteId}` : '',
+        ].filter(Boolean).join(' ');
         lines.push(`  - ${e.file}`);
-        lines.push(`      category=${e.category ?? '(none)'} status=${e.status}${e.reason ? ' reason=' + e.reason : ''}${e.noteId ? ' id=' + e.noteId : ''}`);
+        lines.push(`      category=${e.category ?? '(none)'} status=${e.status}${extra ? ' ' + extra : ''}`);
       }
       return text(lines.join('\n'));
     },

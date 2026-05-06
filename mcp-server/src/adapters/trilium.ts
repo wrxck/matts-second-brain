@@ -81,14 +81,28 @@ export class TriliumAdapter implements BrainAdapter {
     await this.req('GET', '/app-info');
   }
 
-  async search(query: string, opts: { limit?: number; tag?: string } = {}): Promise<BrainNote[]> {
+  async search(query: string, opts: { limit?: number; tag?: string; exactTitle?: boolean } = {}): Promise<BrainNote[]> {
     const limit = opts.limit ?? 20;
-    const q = opts.tag ? `#${normaliseLabel(opts.tag)} ${query}` : query;
+    let q: string;
+    if (opts.exactTitle) {
+      // trilium structured search for exact title matching
+      q = opts.tag
+        ? `note.title = "${query}" #${normaliseLabel(opts.tag)}`
+        : `note.title = "${query}"`;
+    } else {
+      q = opts.tag ? `#${normaliseLabel(opts.tag)} ${query}` : query;
+    }
     const params = new URLSearchParams({ search: q, limit: String(limit), orderBy: 'dateModified', orderDirection: 'desc' });
-    const data = await this.req<{ results: Array<{ noteId: string; title: string; dateModified?: string }> }>(
+    const data = await this.req<{ results: Array<{ noteId: string; title: string; dateModified?: string; paths?: Array<{ path: string }> }> }>(
       'GET', `/notes?${params}`,
     );
-    return (data.results ?? []).map(n => ({ id: n.noteId, title: n.title, modifiedAt: n.dateModified }));
+    return (data.results ?? []).map(n => ({
+      id: n.noteId,
+      title: n.title,
+      modifiedAt: n.dateModified,
+      // first path breadcrumb if trilium returns it; falls through to undefined otherwise
+      path: n.paths?.[0]?.path,
+    }));
   }
 
   async resolvePath(path: string, opts: { create?: boolean } = {}): Promise<string> {

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, type Dirent } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import type { BrainAdapter } from './adapters/index.js';
@@ -6,15 +6,10 @@ import type { BrainAdapter } from './adapters/index.js';
 export type ValidCategory = 'standards' | 'decisions' | 'lessons' | 'apps' | 'reviews' | 'drafts';
 
 export interface OnboardOptions {
-  /** directory to scan for *.md memory files. required. */
   directory: string;
-  /** if true, simulate without writing to brain or deleting source files. */
   dryRun?: boolean;
-  /** if true, delete source files after a successful brain_remember. default false. */
   deleteOnSuccess?: boolean;
-  /** override the default prefix→category mapping. */
   categoryMap?: Record<string, ValidCategory>;
-  /** filenames to skip (basename match, case-sensitive). default: ['MEMORY.md', 'README.md']. */
   excludeFiles?: string[];
 }
 
@@ -23,7 +18,8 @@ export interface OnboardEntry {
   category: ValidCategory | null;
   title: string;
   noteId: string | null;
-  status: 'created' | 'skipped-exists' | 'skipped-no-category' | 'dry-run' | 'failed' | 'deleted-source';
+  status: 'created' | 'skipped-exists' | 'skipped-no-category' | 'dry-run' | 'failed';
+  sourceDeleted?: boolean;
   reason?: string;
 }
 
@@ -35,6 +31,7 @@ export interface OnboardReport {
   skipped: number;
   failed: number;
   deletedSources: number;
+  deletionFailures: number;
   entries: OnboardEntry[];
 }
 
@@ -59,6 +56,7 @@ const CATEGORY_PATH: Record<ValidCategory, string> = {
 };
 
 const CONTENT_KEYWORDS = ['bounty', 'git', 'fleet', 'nginx', 'docker', 'postgres', 'stripe', 'guardian'];
+const SKIP_DIRS = new Set(['node_modules', '.git']);
 
 /** strip yaml frontmatter from content, returning the rest. */
 function stripFrontmatter(raw: string): string {
@@ -132,6 +130,11 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
     excludeFiles = ['MEMORY.md', 'README.md'],
   } = opts;
 
+  // reject root or effectively-root paths
+  if (/^\/?$/.test(directory)) {
+    throw new Error(`refusing to scan root directory: ${directory}`);
+  }
+
   const report: OnboardReport = {
     directory,
     dryRun,
@@ -140,18 +143,31 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
     skipped: 0,
     failed: 0,
     deletedSources: 0,
+    deletionFailures: 0,
     entries: [],
   };
 
-  let allFiles: string[];
+  let dirents: Dirent[];
   try {
-    allFiles = readdirSync(directory).filter(f => f.endsWith('.md'));
+    dirents = readdirSync(directory, { withFileTypes: true, encoding: 'utf8' }) as Dirent[];
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`cannot read directory ${directory}: ${msg}`);
   }
 
-  const files = allFiles.filter(f => !excludeFiles.includes(basename(f)));
+  // filter: only regular .md files, no symlinks, no dirs, no node_modules/.git
+  const files = dirents
+    .filter(d => {
+      if (d.isSymbolicLink()) return false;
+      if (d.isDirectory()) return false;
+      if (!d.isFile()) return false;
+      if (SKIP_DIRS.has(d.name)) return false;
+      if (!d.name.endsWith('.md')) return false;
+      if (excludeFiles.includes(basename(d.name))) return false;
+      return true;
+    })
+    .map(d => d.name);
+
   report.total = files.length;
 
   for (const filename of files) {
@@ -193,26 +209,45 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
     }
 
     if (dryRun) {
+      report.skipped++;
       report.entries.push({ file: filename, category, title, noteId: null, status: 'dry-run' });
       continue;
     }
 
-    // idempotency check: search by title and see if an exact match exists
+    // idempotency check: exact-title search to avoid false positives from body text
     let existing: Awaited<ReturnType<typeof adapter.search>>;
     try {
-      existing = await adapter.search(title, { tag: 'claude-brain', limit: 5 });
+      existing = await adapter.search(title, { tag: 'claude-brain', limit: 10, exactTitle: true });
     } catch {
       existing = [];
     }
-    const exact = existing.filter(n => n.title === title);
-    if (exact.length >= 2) {
+
+    // category-path verification: check that the matched note lives under the expected category folder
+    const expectedPathFragment = CATEGORY_PATH[category];
+    const categoryMatched = existing.filter(n => {
+      if (!n.path) return true; // no path info — trust title match, surface warning via reason
+      return n.path.includes(expectedPathFragment);
+    });
+
+    if (categoryMatched.length === 0 && existing.length > 0) {
+      // title matches exist but in the wrong category — treat as distinct, create new
+    } else if (categoryMatched.length >= 2) {
       report.skipped++;
-      report.entries.push({ file: filename, category, title, noteId: null, status: 'skipped-exists', reason: 'multiple existing notes match title' });
+      report.entries.push({
+        file: filename, category, title, noteId: null, status: 'skipped-exists',
+        reason: 'multiple existing notes match title in this category',
+      });
       continue;
-    }
-    if (exact.length === 1) {
+    } else if (categoryMatched.length === 1) {
+      const matched = categoryMatched[0];
+      const pathWarning = matched.path
+        ? undefined
+        : 'idempotency check is title-only; backend does not expose path';
       report.skipped++;
-      report.entries.push({ file: filename, category, title, noteId: exact[0].id, status: 'skipped-exists' });
+      report.entries.push({
+        file: filename, category, title, noteId: matched.id, status: 'skipped-exists',
+        reason: pathWarning,
+      });
       continue;
     }
 
@@ -236,15 +271,19 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
     }
 
     report.created++;
-    report.entries.push({ file: filename, category, title, noteId: created.id, status: 'created' });
+    const entry: OnboardEntry = { file: filename, category, title, noteId: created.id, status: 'created' };
+    report.entries.push(entry);
 
     if (deleteOnSuccess) {
       try {
         rmSync(filePath);
         report.deletedSources++;
-        report.entries.push({ file: filename, category, title, noteId: created.id, status: 'deleted-source' });
-      } catch {
-        // non-fatal: note was created, source deletion just failed
+        entry.sourceDeleted = true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        report.deletionFailures++;
+        entry.sourceDeleted = false;
+        entry.reason = `source deletion failed: ${msg}`;
       }
     }
   }
