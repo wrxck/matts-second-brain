@@ -74,17 +74,23 @@ export class NotionAdapter implements BrainAdapter {
     await this.req<NotionPage>('GET', `/pages/${this.rootPageId}`);
   }
 
-  async search(query: string, opts: { limit?: number; tag?: string } = {}): Promise<BrainNote[]> {
-    const data = await this.req<NotionSearch>('POST', '/search', {
+  async search(query: string, opts: { limit?: number; tag?: string; exactTitle?: boolean } = {}): Promise<BrainNote[]> {
+    // always send query so notion's relevance ranking applies; post-filter for exactTitle
+    const body: Record<string, unknown> = {
       query,
       filter: { property: 'object', value: 'page' },
       page_size: opts.limit ?? 20,
-    });
-    return data.results.map(p => ({
+    };
+    const data = await this.req<NotionSearch>('POST', '/search', body);
+    let results = data.results.map(p => ({
       id: p.id,
       title: pageTitle(p),
       modifiedAt: p.last_edited_time,
     }));
+    if (opts.exactTitle) {
+      results = results.filter(n => n.title === query);
+    }
+    return results.slice(0, opts.limit ?? 20);
   }
 
   async resolvePath(path: string, opts: { create?: boolean } = {}): Promise<string> {

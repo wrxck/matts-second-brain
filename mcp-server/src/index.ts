@@ -9,6 +9,7 @@
  *   brain_remember         — write a note with the right taxonomy + tags
  *   brain_update           — update a note with explicit "supersedes" link + reason
  *   brain_scan_transcripts — analyse ~/.claude/projects/* for inferable notes (dry by default)
+ *   brain_onboard          — migrate on-disk memory dir into the brain (idempotent, dry-run capable)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -19,6 +20,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 import { loadAdapter, type BrainAdapter } from './adapters/index.js';
+import { onboardDirectory } from './onboard.js';
 import { exportBrain, indexExport, querySrag, sragInstalled, exportDir } from './srag.js';
 
 const ROOT_NOTE_TITLE = 'Claude Memory';
@@ -330,6 +332,42 @@ async function main() {
         const scoreStr = typeof h.score === 'number' ? ` score=${h.score.toFixed(3)}` : '';
         lines.push(`  • ${h.file}${h.noteId ? `  (noteId=${h.noteId})` : ''}${scoreStr}`);
         if (h.snippet) lines.push(`      "${h.snippet.slice(0, 240).replace(/\s+/g, ' ').trim()}${h.snippet.length > 240 ? '…' : ''}"`);
+      }
+      return text(lines.join('\n'));
+    },
+  );
+
+  // brain_onboard
+  server.tool(
+    'brain_onboard',
+    'Onboard an on-disk memory directory: scan for *.md files and migrate each to the brain via brain_remember. Idempotent (skips notes that already exist by title). Dry-run capable. Optionally deletes source files after success.',
+    {
+      directory: z.string().describe('Directory containing the memory files (e.g. /root/.claude/projects/-home-matt/memory/)'),
+      dryRun: z.boolean().optional().default(false).describe('If true, simulate without writing to brain or deleting files'),
+      deleteOnSuccess: z.boolean().optional().default(false).describe('If true, delete each source file after its brain_remember succeeds'),
+    },
+    async ({ directory, dryRun, deleteOnSuccess }) => {
+      const adapter = loadAdapter();
+      const report = await onboardDirectory(adapter, { directory, dryRun, deleteOnSuccess });
+      const lines = [
+        `Onboard report for ${report.directory} (dry-run=${report.dryRun})`,
+        `  total scanned:     ${report.total}`,
+        `  created:           ${report.created}`,
+        `  skipped:           ${report.skipped}`,
+        `  failed:            ${report.failed}`,
+        `  source deleted:    ${report.deletedSources}`,
+        `  deletion failures: ${report.deletionFailures}`,
+        ``,
+        `Entries:`,
+      ];
+      for (const e of report.entries) {
+        const extra = [
+          e.sourceDeleted === true ? 'source-deleted=true' : e.sourceDeleted === false ? 'source-deleted=false(failed)' : '',
+          e.reason ? `reason=${e.reason}` : '',
+          e.noteId ? `id=${e.noteId}` : '',
+        ].filter(Boolean).join(' ');
+        lines.push(`  - ${e.file}`);
+        lines.push(`      category=${e.category ?? '(none)'} status=${e.status}${extra ? ' ' + extra : ''}`);
       }
       return text(lines.join('\n'));
     },
