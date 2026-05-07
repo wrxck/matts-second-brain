@@ -47,6 +47,11 @@ function escapeHtml(s: string): string {
   return s.replace(/[<>&]/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' } as const)[ch as '<' | '>' | '&']);
 }
 
+/** escape backslashes and double-quotes for use inside trilium structured-search string literals. */
+function escapeQuotes(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 /** Trilium label names cannot contain '-'; the UI silently converts to '_'.
  *  Normalise so callers can use the friendlier "claude-brain" everywhere. */
 function normaliseLabel(tag: string): string {
@@ -85,10 +90,10 @@ export class TriliumAdapter implements BrainAdapter {
     const limit = opts.limit ?? 20;
     let q: string;
     if (opts.exactTitle) {
-      // trilium structured search for exact title matching
+      const escaped = escapeQuotes(query);
       q = opts.tag
-        ? `note.title = "${query}" #${normaliseLabel(opts.tag)}`
-        : `note.title = "${query}"`;
+        ? `note.title = "${escaped}" #${normaliseLabel(opts.tag)}`
+        : `note.title = "${escaped}"`;
     } else {
       q = opts.tag ? `#${normaliseLabel(opts.tag)} ${query}` : query;
     }
@@ -109,7 +114,7 @@ export class TriliumAdapter implements BrainAdapter {
     const segments = path.split('/').filter(Boolean);
     let parentId = 'root';
     for (const seg of segments) {
-      const found = await this.search(`note.parents.noteId = "${parentId}" AND note.title = "${seg}"`, { limit: 1 });
+      const found = await this.search(`note.parents.noteId = "${escapeQuotes(parentId)}" AND note.title = "${escapeQuotes(seg)}"`, { limit: 1 });
       if (found.length > 0) { parentId = found[0].id; continue; }
       if (!opts.create) throw new Error(`Trilium path not found: ${path} (stuck at ${seg})`);
       const created = await this.req<{ note: { noteId: string } }>('POST', '/create-note', {

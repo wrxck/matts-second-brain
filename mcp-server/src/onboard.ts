@@ -6,10 +6,15 @@ import type { BrainAdapter } from './adapters/index.js';
 export type ValidCategory = 'standards' | 'decisions' | 'lessons' | 'apps' | 'reviews' | 'drafts';
 
 export interface OnboardOptions {
+  /** directory to scan for *.md memory files. required. */
   directory: string;
+  /** if true, simulate without writing to brain or deleting source files. */
   dryRun?: boolean;
+  /** if true, delete source files after a successful brain_remember. default false. */
   deleteOnSuccess?: boolean;
+  /** override the default prefix→category mapping. */
   categoryMap?: Record<string, ValidCategory>;
+  /** filenames to skip (basename match, case-sensitive). default: ['MEMORY.md', 'README.md']. */
   excludeFiles?: string[];
 }
 
@@ -56,7 +61,6 @@ const CATEGORY_PATH: Record<ValidCategory, string> = {
 };
 
 const CONTENT_KEYWORDS = ['bounty', 'git', 'fleet', 'nginx', 'docker', 'postgres', 'stripe', 'guardian'];
-const SKIP_DIRS = new Set(['node_modules', '.git']);
 
 /** strip yaml frontmatter from content, returning the rest. */
 function stripFrontmatter(raw: string): string {
@@ -161,7 +165,6 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
       if (d.isSymbolicLink()) return false;
       if (d.isDirectory()) return false;
       if (!d.isFile()) return false;
-      if (SKIP_DIRS.has(d.name)) return false;
       if (!d.name.endsWith('.md')) return false;
       if (excludeFiles.includes(basename(d.name))) return false;
       return true;
@@ -222,11 +225,11 @@ export async function onboardDirectory(adapter: BrainAdapter, opts: OnboardOptio
       existing = [];
     }
 
-    // category-path verification: check that the matched note lives under the expected category folder
-    const expectedPathFragment = CATEGORY_PATH[category];
+    // category-path verification: separator-bounded match so 'Apps' does not match 'Apps development' or 'My apps'
+    const expectedFolder = CATEGORY_PATH[category];
     const categoryMatched = existing.filter(n => {
       if (!n.path) return true; // no path info — trust title match, surface warning via reason
-      return n.path.includes(expectedPathFragment);
+      return ('/' + n.path + '/').includes('/' + expectedFolder + '/');
     });
 
     if (categoryMatched.length === 0 && existing.length > 0) {

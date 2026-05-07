@@ -15,13 +15,23 @@ class FakeAdapter implements BrainAdapter {
   async ping() {}
 
   async search(query: string, opts?: { limit?: number; tag?: string; exactTitle?: boolean }): Promise<BrainNote[]> {
-    let candidates = this.notes;
+    const limit = opts?.limit ?? 20;
+    let candidates: typeof this.notes;
     if (opts?.exactTitle) {
+      // exact title only — mirrors trilium structured search behaviour
       candidates = this.notes.filter(n => n.title === query);
     } else {
-      candidates = this.notes.filter(n => n.title.toLowerCase().includes(query.toLowerCase()));
+      // full-text: match title or body, mirrors trilium free-text behaviour
+      // (body matches can crowd out the real title match when limit is small)
+      candidates = this.notes.filter(
+        n =>
+          n.title.toLowerCase().includes(query.toLowerCase()) ||
+          n.body.toLowerCase().includes(query.toLowerCase()),
+      );
     }
-    return candidates.map(n => ({ id: n.id, title: n.title, modifiedAt: '2026-05-06', path: n.path }));
+    return candidates
+      .slice(0, limit)
+      .map(n => ({ id: n.id, title: n.title, modifiedAt: '2026-05-06', path: n.path }));
   }
 
   async resolvePath() {
@@ -233,26 +243,27 @@ The real body content goes here.`;
     expect(note.body).toContain('We picked postgres for storage');
   });
 
-  // regression: exactTitle prevents false-positive idempotency
-  it('exactTitle: note with body containing title substring is not treated as existing', async () => {
-    // "Other thing" body contains the words "Test thing" — without exactTitle
-    // a substring search would return it and cause a false-positive skip
+  // regression: a note with the same title in the wrong category must not prevent creation.
+  // pre-fix: search returns it, title matches, file is skipped (false-positive).
+  // post-fix: category path check rejects the wrong-category match, note is created.
+  it('exactTitle+category: same-title note in wrong category does not prevent creation', async () => {
     adapter.notes.push({
-      id: 'other-1',
-      title: 'Other thing',
-      body: 'This body mentions Test thing somewhere.',
+      id: 'wrong-cat-1',
+      title: 'Test thing',
+      body: 'An old lesson with the same title.',
       tags: ['claude-brain'],
-      path: 'Claude Memory/Standards/Other thing',
+      path: 'Claude Memory/Lessons Learned/Test thing', // lessons, not standards
     });
 
-    writeFile(dir, 'feedback_test_thing.md', '# Test thing\n\nA brand new note.');
+    // feedback_ prefix maps to standards
+    writeFile(dir, 'feedback_test_thing.md', '# Test thing\n\nA brand new standard.');
 
     const report = await onboardDirectory(adapter, { directory: dir, dryRun: false, deleteOnSuccess: false });
 
-    // should be created, not skipped — title mismatch
+    // wrong-category match rejected → new note created under standards
     expect(report.created).toBe(1);
     expect(report.skipped).toBe(0);
-    expect(adapter.notes.find(n => n.title === 'Test thing')).toBeDefined();
+    expect(adapter.notes.filter(n => n.title === 'Test thing')).toHaveLength(2);
   });
 
   // walker safety: symlinks are skipped
