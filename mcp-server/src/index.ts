@@ -22,6 +22,10 @@ import { homedir } from 'node:os';
 import { loadAdapter, type BrainAdapter } from './adapters/index.js';
 import { onboardDirectory } from './onboard.js';
 import { exportBrain, indexExport, querySrag, sragInstalled, exportDir } from './srag.js';
+import { findDuplicate } from './dedup.js';
+import { auditWrite } from './audit.js';
+import { checkCitations } from './citations.js';
+import { computeStats } from './stats.js';
 
 const ROOT_NOTE_TITLE = 'Claude Memory';
 const TAXONOMY = ['00 — How to use this brain', 'Standards', 'Decisions', 'Lessons Learned', 'Apps', 'Reviews', 'Drafts'] as const;
@@ -162,8 +166,9 @@ async function main() {
       body: z.string().min(20).describe('Note body. For decisions/lessons MUST include "What:", "Why:", "Evidence:" lines.'),
       app: z.string().optional().describe('Required when category=apps — the app name (e.g. "macpool")'),
       tags: z.array(z.string()).optional().default([]).describe('Extra labels beyond claude-brain'),
+      force: z.boolean().optional().default(false).describe('Write even if a near-duplicate note already exists. Default false — a near-duplicate is reported (so you can brain_update it) instead of silently growing duplicates.'),
     },
-    async ({ category, title, body, app, tags }) => {
+    async ({ category, title, body, app, tags, force }) => {
       if (category === 'apps' && !app) {
         return text('Error: category=apps requires `app` argument (e.g. app="macpool").');
       }
@@ -175,8 +180,21 @@ async function main() {
         );
       }
       const a = loadAdapter();
+      if (!force) {
+        const dup = await findDuplicate(a, title).catch(() => null);
+        if (dup) {
+          auditWrite({ action: 'dedupe-skip', backend: a.name, category, title, noteId: dup.id });
+          return text(
+            `Possible duplicate (similarity ${dup.score.toFixed(2)}) of an existing note:\n` +
+            `  • ${dup.title} [id=${dup.id}]${dup.path ? ` — ${dup.path}` : ''}\n\n` +
+            `If this is the same knowledge, brain_update id=${dup.id} instead. ` +
+            `To write a genuinely separate note anyway, re-call with force=true.`,
+          );
+        }
+      }
       const parentPath = `${ROOT_NOTE_TITLE}/${categoryToPath(category, category === 'apps' ? app : undefined).split('/').slice(1).join('/')}`;
       const out = await a.create({ parentPath, title, body, tags: ['claude-brain', ...tags] });
+      auditWrite({ action: 'remember', backend: a.name, category, title, noteId: out.id });
       return text(`Wrote (backend=${a.name}): ${out.path}\n  id: ${out.id}\n  tags: claude-brain${tags.length ? ', ' + tags.join(', ') : ''}`);
     },
   );
@@ -203,6 +221,7 @@ async function main() {
       }).catch(() => null);
       const stamp = `\n\n--- Updated ${new Date().toISOString()}: ${reason} ---`;
       await a.setContent(noteId, newBody + stamp);
+      auditWrite({ action: 'update', backend: a.name, noteId, detail: reason });
       return text(
         `Updated note ${noteId}\n` +
         `  Archived prior content as: ${archived?.id ?? '(adapter does not support archive children — old body lost)'}\n` +
@@ -373,7 +392,51 @@ async function main() {
     },
   );
 
-  // ── ready ────────────────────────────────────────────────────────────
+  // brain_check_citations
+  server.tool(
+    'brain_check_citations',
+    'Verify-before-asserting, automated: walk the brain, extract file-path citations from each note, and report notes whose cited files no longer exist on disk. Use to find stale knowledge worth updating or archiving.',
+    {
+      roots: z.array(z.string()).optional().describe('Directories to resolve relative citations against (default: $HOME).'),
+      limit: z.number().optional().default(1000).describe('Max notes to scan'),
+    },
+    async ({ roots, limit }) => {
+      const a = loadAdapter();
+      const drift = await checkCitations(a, { roots, limit });
+      if (drift.length === 0) return text(`No stale file citations found (backend=${a.name}). The brain's references still resolve.`);
+      const lines: string[] = [`${drift.length} note(s) cite files that no longer exist (backend=${a.name}):`, ''];
+      for (const d of drift) {
+        lines.push(`  • ${d.title} [id=${d.noteId}]`);
+        for (const m of d.missing) lines.push(`      missing: ${m}`);
+      }
+      lines.push('', 'Review each: update the note (brain_update) if the file moved, or archive it if the system is gone.');
+      return text(lines.join('\n'));
+    },
+  );
+
+  // brain_stats
+  server.tool(
+    'brain_stats',
+    'Health snapshot of the brain: note counts by category, total, and the most recently touched notes. Use to see whether the brain is growing and where.',
+    {
+      recentDays: z.number().optional().default(7).describe('Window for the "recent" list (default 7 days)'),
+    },
+    async ({ recentDays }) => {
+      const a = loadAdapter();
+      const s = await computeStats(a, { recentDays });
+      const cats = Object.entries(s.byCategory).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k}: ${v}`);
+      const lines: string[] = [
+        `Brain stats (backend=${a.name})`,
+        `  total notes: ${s.total}`,
+        `  by category: ${cats.length ? cats.join(', ') : '(none)'}`,
+        `  modified in last ${recentDays}d: ${s.recent.length}`,
+      ];
+      for (const r of s.recent.slice(0, 10)) lines.push(`    - ${r.title}${r.modifiedAt ? ` (${r.modifiedAt.slice(0, 10)})` : ''}`);
+      return text(lines.join('\n'));
+    },
+  );
+
+  // ready
   await server.connect(new StdioServerTransport());
 }
 
