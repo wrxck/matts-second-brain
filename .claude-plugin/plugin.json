@@ -20,31 +20,37 @@
   "userConfig": {
     "sessionReminder": {
       "type": "boolean",
+      "title": "Session reminder",
       "default": true,
       "description": "Inject the brain discipline at session start (knowledge-only, recall-before, capture-after). Set false to rely on the auto-loaded skill alone."
     },
     "scheduledMaintenance": {
       "type": "boolean",
+      "title": "Scheduled maintenance",
       "default": false,
       "description": "Run unattended nightly brain maintenance (scan transcripts, persist durable knowledge, reindex). Enable, then run /matts-second-brain:maintenance install."
     },
     "maintenanceSchedule": {
       "type": "string",
+      "title": "Maintenance schedule (cron)",
       "default": "0 4 * * *",
       "description": "Cron expression (UTC) for scheduled maintenance."
     },
     "maintenanceModel": {
       "type": "string",
+      "title": "Maintenance model",
       "default": "claude-sonnet-4-6",
       "description": "Model the unattended maintenance run uses."
     },
     "scanSinceDays": {
       "type": "number",
+      "title": "Scan window (days)",
       "default": 2,
       "description": "How many days of recent transcripts the maintenance scan considers."
     },
     "maintenanceTimeoutMin": {
       "type": "number",
+      "title": "Maintenance timeout (minutes)",
       "default": 10,
       "description": "Hard timeout (minutes) for the unattended maintenance agent run."
     }
