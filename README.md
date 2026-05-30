@@ -24,10 +24,32 @@ Built after a real incident: a leaked secret revealed that the only memory Claud
 
 | Component | What it does |
 |---|---|
-| **MCP server** (`@matthesketh/second-brain-mcp`) | Tools: `brain_recall`, `brain_remember`, `brain_scan_transcripts`, `brain_setup_check`, `brain_install` |
-| **Skills** (`/matts-second-brain:install`, `:recall`, `:remember`) | User-invokable commands for setup + manual write-back |
+| **MCP server** (`@matthesketh/second-brain-mcp`) | Tools: `brain_recall`, `brain_search_semantic`, `brain_remember` (dedup-on-write), `brain_update`, `brain_scan_transcripts`, `brain_check_citations`, `brain_stats`, `brain_sync_srag`, `brain_setup_check`, `brain_seed_taxonomy`, `brain_onboard`. Every write is audited (secret-redacted). |
+| **Skills** (`:install`, `:recall`, `:remember`, `:maintenance`, `:hygiene`) | Setup, manual write-back, scheduled self-consolidation, and periodic cleanup |
 | **Discipline skill** (loaded via plugin) | The rules Claude follows: cite when consulting, verify before recommending, write decisions not opinions, surface contradictions |
 | **Setup wizard** | Detects whether Trilium is reachable; offers to install if not. Generates the root taxonomy. Optionally seeds from existing transcripts. |
+
+## Configuration & automation
+
+The plugin exposes opt-in `userConfig` (set via `/config` or the plugin settings):
+
+| Option | Default | Effect |
+|---|---|---|
+| `sessionReminder` | `true` | a SessionStart hook injects the brain discipline (knowledge-only, recall-before, capture-after) every session |
+| `scheduledMaintenance` | `false` | enable the nightly self-consolidation job |
+| `maintenanceSchedule` | `0 4 * * *` | cron (UTC) for the job |
+| `maintenanceModel` / `scanSinceDays` / `maintenanceTimeoutMin` | sonnet / 2 / 10 | tuning for the unattended run |
+
+**Self-consolidation.** With `scheduledMaintenance` enabled, `/matts-second-brain:maintenance install`
+adds a local cron that runs a tested, dependency-free harness (`maintenance/`). It launches a
+headless `claude -p` constrained to the brain tools to scan recent transcripts, persist durable
+knowledge (deduped), and reindex — so the brain updates itself even when you don't think to.
+It is **local** (not a cloud `/schedule` routine) because the brain backend is local. Manage it
+with `/matts-second-brain:maintenance` (`install` / `status` / `run` / `dry-run` / `uninstall` / `test`).
+
+**Hygiene.** `/matts-second-brain:hygiene` (dry-run by default) dedupes near-duplicates, flags
+stale citations and contradictions via `brain_check_citations`, and proposes archiving long-unused
+notes.
 
 ## Install
 
