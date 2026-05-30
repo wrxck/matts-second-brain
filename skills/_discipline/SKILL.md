@@ -91,6 +91,7 @@ If unsure, **ask the user** before writing — better to skip than to fill the b
 
 ## When NOT to write
 
+- **Transient or operational state** — task status, todos, "currently working on X", deployment/run state. The brain is for durable **knowledge**; ephemeral state belongs in working notes or the task list, never here.
 - Routine commits, PRs, and merges — git history already records them.
 - Trivial bug fixes where the cause is obvious from the diff.
 - Conversational acknowledgements.
