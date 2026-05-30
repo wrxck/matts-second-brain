@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.tgz
 .DS_Store
+__pycache__/
+*.pyc
+maintenance/logs/
+maintenance/.lock
+maintenance/.cron.lock
