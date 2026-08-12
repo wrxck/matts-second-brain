@@ -33,7 +33,7 @@ BRAIN_MAINT_CRON="<maintenanceSchedule>" \
 BRAIN_MAINT_MODEL="<maintenanceModel>" \
 BRAIN_MAINT_SINCE_DAYS="<scanSinceDays>" \
 BRAIN_MAINT_TIMEOUT_MS="$(( <maintenanceTimeoutMin> * 60000 ))" \
-bash install.sh
+bash "${CLAUDE_PLUGIN_ROOT}/maintenance/install.sh"
 ```
 
 Then show `crontab -l | grep matts-second-brain-maintenance` to confirm. Remind the user
@@ -53,7 +53,7 @@ persist a few notes. Afterwards show the new `agent-summary` log line.
 `node maintenance/run.mjs --dry-run` — health-check + print the prompt, no agent invoked. Safe.
 
 ### uninstall
-`bash maintenance/install.sh --uninstall` — removes the cron entry. Leaves logs in place.
+`bash "${CLAUDE_PLUGIN_ROOT}/maintenance/install.sh" --uninstall` — removes the cron entry. Leaves logs in place.
 
 ### test
 `cd maintenance && node --test` — runs the harness test suite (lock/health/timeout/exit
