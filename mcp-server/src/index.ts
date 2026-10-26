@@ -21,6 +21,8 @@ import { homedir } from 'node:os';
 
 import { loadAdapter, type BrainAdapter } from './adapters/index.js';
 import { onboardDirectory } from './onboard.js';
+import { assertMemoryDirectory } from './paths.js';
+import { parseTransportArgs, readToken, serveHttp } from './http.js';
 import { exportBrain, indexExport, querySrag, sragInstalled, exportDir } from './srag.js';
 import { findDuplicate } from './dedup.js';
 import { auditWrite } from './audit.js';
@@ -49,7 +51,7 @@ function text(s: string) {
   return { content: [{ type: 'text' as const, text: s }] };
 }
 
-async function main() {
+function createServer(): McpServer {
   const server = new McpServer({ name: 'second-brain', version: '0.1.0' });
 
   // ── brain_setup_check ───────────────────────────────────────────────
@@ -359,7 +361,7 @@ async function main() {
   // brain_onboard
   server.tool(
     'brain_onboard',
-    'Onboard an on-disk memory directory: scan for *.md files and migrate each to the brain via brain_remember. Idempotent (skips notes that already exist by title). Dry-run capable. Optionally deletes source files after success.',
+    'Onboard an on-disk memory directory: scan for *.md files and migrate each to the brain via brain_remember. Idempotent (skips notes that already exist by title). Dry-run capable. Optionally deletes source files after success. Only ~/.claude/projects/<project>/memory directories are accepted.',
     {
       directory: z.string().describe('Directory containing the memory files (e.g. /root/.claude/projects/-home-matt/memory/)'),
       dryRun: z.boolean().optional().default(false).describe('If true, simulate without writing to brain or deleting files'),
@@ -367,7 +369,7 @@ async function main() {
     },
     async ({ directory, dryRun, deleteOnSuccess }) => {
       const adapter = loadAdapter();
-      const report = await onboardDirectory(adapter, { directory, dryRun, deleteOnSuccess });
+      const report = await onboardDirectory(adapter, { directory: assertMemoryDirectory(directory), dryRun, deleteOnSuccess });
       const lines = [
         `Onboard report for ${report.directory} (dry-run=${report.dryRun})`,
         `  total scanned:     ${report.total}`,
@@ -436,8 +438,17 @@ async function main() {
     },
   );
 
-  // ready
-  await server.connect(new StdioServerTransport());
+  return server;
+}
+
+async function main() {
+  const opts = parseTransportArgs(process.argv.slice(2));
+  if (opts.transport === 'http') {
+    await serveHttp(createServer, { bind: opts.bind, port: opts.port, token: readToken(opts.authTokenFile!) });
+    console.error(`second-brain-mcp listening on http://${opts.bind}:${opts.port}/mcp`);
+    return;
+  }
+  await createServer().connect(new StdioServerTransport());
 }
 
 main().catch(err => {

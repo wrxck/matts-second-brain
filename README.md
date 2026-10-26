@@ -113,6 +113,28 @@ For a host where multiple OS users share one Claude/Trilium instance:
 
 Membership in the `claude` group grants access. The wizard sets this up if you opt into multi-user mode.
 
+### One shared server for every session
+
+In place of one stdio copy per Claude session, one service can serve every session on the host:
+
+```bash
+node mcp-server/dist/index.js --transport http --bind 127.0.0.1 --port 7408 --auth-token-file /etc/mcp/tokens/second-brain
+```
+
+- Each request must send `Authorization: Bearer <token>` (the token file holds 16 characters or more). Any other request gets `401`.
+- The server is stateless: each request gets a new MCP server, so sessions share nothing.
+- `brain_onboard` accepts only `~/.claude/projects/<project>/memory` directories, after it resolves symlinks. A shared service often runs as root, and onboard can delete the files it reads.
+
+Client entry:
+
+```json
+"second-brain": {
+  "type": "http",
+  "url": "http://127.0.0.1:7408/mcp",
+  "headersHelper": "/usr/local/bin/mcp-auth-header second-brain"
+}
+```
+
 ## License
 
 MIT
